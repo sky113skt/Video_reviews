@@ -26,11 +26,12 @@ from ..utils.text_processor import TextProcessor
 class MovieReviewAgent:
     """智能电影影评Agent"""
     
-    def __init__(self, openai_api_key: str, tmdb_api_key: str):
+    def __init__(self, kimi_api_key: str, tmdb_api_key: str):
         self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
+            model="moonshot-v1-8k",
             temperature=0.7,
-            openai_api_key=openai_api_key
+            openai_api_key=kimi_api_key,
+            openai_api_base="https://api.moonshot.cn/v1"
         )
         
         self.tmdb_service = TMDBService(tmdb_api_key)
@@ -52,12 +53,12 @@ class MovieReviewAgent:
         return [
             Tool(
                 name="search_movie_info",
-                func=self._search_movie_info,
+                func=lambda x: asyncio.run(self._search_movie_info(x)),
                 description="搜索电影基本信息，包括剧情、导演、演员、评分等"
             ),
             Tool(
                 name="search_reviews",
-                func=self._search_existing_reviews,
+                func=lambda x: asyncio.run(self._search_existing_reviews(x)),
                 description="搜索现有影评和用户评价"
             ),
             Tool(
@@ -124,13 +125,29 @@ class MovieReviewAgent:
             # 生成评分
             rating = await self._calculate_rating(movie_info, context)
             
+            # 计算字数统计
+            word_count = len(review_content.replace(' ', '').replace('\n', ''))
+            
+            # 提取评分分解信息
+            tmdb_reviews = context.get("tmdb_reviews", {})
+            rating_breakdown = tmdb_reviews.get("rating_breakdown", {})
+            confidence_level = tmdb_reviews.get("confidence_level", "未知")
+            sentiment_distribution = tmdb_reviews.get("sentiment_distribution", {})
+            review_count = tmdb_reviews.get("review_count", 0)
+            
             return ReviewResponse(
                 title=movie_info.title,
                 year=movie_info.year,
                 rating=rating,
                 review=review_content,
                 sources=context.get("sources", []),
-                generated_at=datetime.now()
+                generated_at=datetime.now(),
+                word_count=word_count,
+                review_style=request.review_style,
+                rating_breakdown=rating_breakdown,
+                confidence_level=confidence_level,
+                sentiment_distribution=sentiment_distribution,
+                review_count=review_count
             )
             
         except Exception as e:
@@ -140,12 +157,19 @@ class MovieReviewAgent:
                 rating=0.0,
                 review=f"生成影评时出现错误: {str(e)}",
                 sources=[],
-                generated_at=datetime.now()
+                generated_at=datetime.now(),
+                word_count=0,
+                review_style=request.review_style,
+                rating_breakdown={},
+                confidence_level="错误",
+                sentiment_distribution={},
+                review_count=0
             )
     
     async def _get_movie_info(self, title: str, year: Optional[int] = None) -> MovieInfo:
         """获取电影详细信息"""
-        return await self.tmdb_service.search_movie(title, year)
+        async with self.tmdb_service as service:
+            return await service.search_movie(title, year)
     
     async def _collect_context(self, movie_info: MovieInfo, request: ReviewRequest) -> Dict[str, Any]:
         """收集分析上下文"""
@@ -153,29 +177,62 @@ class MovieReviewAgent:
             "movie_info": movie_info.dict(),
             "existing_reviews": [],
             "sentiment_analysis": {},
+            "tmdb_reviews": {},
             "cultural_context": {},
             "box_office": {},
             "awards": [],
             "sources": []
         }
         
-        # 搜索现有影评
-        reviews = await self._search_existing_reviews(movie_info.title)
-        context["existing_reviews"] = reviews
-        
-        # 情感分析
-        if reviews:
-            sentiments = [self.sentiment_analyzer.analyze(review["content"]) for review in reviews[:10]]
-            context["sentiment_analysis"] = {
-                "positive": sum(1 for s in sentiments if s > 0.1),
-                "neutral": sum(1 for s in sentiments if -0.1 <= s <= 0.1),
-                "negative": sum(1 for s in sentiments if s < -0.1),
-                "average_score": sum(sentiments) / len(sentiments) if sentiments else 0
+        try:
+            # 获取TMDB评论和评分
+            if hasattr(movie_info, 'id') or movie_info.title:
+                # 尝试通过标题搜索获取电影ID
+                async with self.tmdb_service as service:
+                    try:
+                        # 重新搜索获取完整信息（包含ID）
+                        full_movie_info = await service.search_movie(movie_info.title, movie_info.year)
+                        if hasattr(full_movie_info, 'id') and full_movie_info.id:
+                            # 获取基于评论的评分
+                            review_rating = await service.calculate_review_based_rating(full_movie_info.id)
+                            context["tmdb_reviews"] = review_rating
+                            
+                            # 获取TMDB评论作为现有评论
+                            tmdb_reviews = await service.get_movie_reviews(full_movie_info.id)
+                            context["existing_reviews"] = [
+                                {"content": review.get("content", ""), "author": review.get("author", "")}
+                                for review in tmdb_reviews[:20]  # 取前20条评论
+                            ]
+                    except Exception as e:
+                        print(f"获取TMDB评论失败: {e}")
+            
+            # 如果没有TMDB评论，使用传统搜索
+            if not context["existing_reviews"]:
+                reviews = await self._search_existing_reviews(movie_info.title)
+                context["existing_reviews"] = reviews
+            
+            # 情感分析
+            if context["existing_reviews"]:
+                sentiments = [self.sentiment_analyzer.analyze(review["content"]) for review in context["existing_reviews"][:10]]
+                context["sentiment_analysis"] = {
+                    "positive": sum(1 for s in sentiments if s > 0.1),
+                    "neutral": sum(1 for s in sentiments if -0.1 <= s <= 0.1),
+                    "negative": sum(1 for s in sentiments if s < -0.1),
+                    "average_score": sum(sentiments) / len(sentiments) if sentiments else 0
+                }
+            
+            # 搜索文化背景
+            cultural_info = await self._search_cultural_context(movie_info)
+            context["cultural_context"] = cultural_info
+            
+        except Exception as e:
+            print(f"收集上下文时出错: {e}")
+            # 提供基础上下文，避免错误中断流程
+            context["cultural_context"] = {
+                "cultural_significance": f"关于{movie_info.title}的相关文化背景",
+                "social_impact": "该电影在社会文化层面的影响",
+                "historical_context": "上映时期的历史背景"
             }
-        
-        # 搜索文化背景
-        cultural_info = await self._search_cultural_context(movie_info)
-        context["cultural_context"] = cultural_info
         
         return context
     
@@ -208,7 +265,15 @@ class MovieReviewAgent:
         return response.content
     
     async def _calculate_rating(self, movie_info: MovieInfo, context: Dict[str, Any]) -> float:
-        """计算综合评分"""
+        """计算综合评分 - 基于TMDB评论"""
+        # 优先使用基于TMDB评论的评分
+        tmdb_rating_data = context.get("tmdb_reviews", {})
+        tmdb_rating = tmdb_rating_data.get("rating", 0)
+        if tmdb_rating > 0:
+            # 如果有TMDB评论评分，直接使用
+            return tmdb_rating
+        
+        # 如果没有TMDB评论评分，使用传统方法
         base_score = movie_info.rating or 0
         
         # 考虑情感分析
@@ -221,7 +286,7 @@ class MovieReviewAgent:
         
         return min(max(final_score, 0), 10)
     
-    def _search_movie_info(self, query: str) -> str:
+    async def _search_movie_info(self, query: str) -> str:
         """搜索电影信息工具"""
         try:
             # 这里简化为返回字符串，实际应该调用具体服务
@@ -229,7 +294,7 @@ class MovieReviewAgent:
         except Exception as e:
             return f"搜索失败: {str(e)}"
     
-    def _search_existing_reviews(self, query: str) -> List[Dict]:
+    async def _search_existing_reviews(self, query: str) -> List[Dict]:
         """搜索现有影评"""
         try:
             # 这里简化为返回空列表，实际应该调用具体服务

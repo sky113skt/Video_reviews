@@ -3,34 +3,16 @@
 """
 
 from typing import Dict, List, Any
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-import torch
-import numpy as np
 import re
+import random
 
 
 class SentimentAnalyzer:
     """情感分析器"""
     
     def __init__(self):
-        self.model_name = "uer/chinese_roberta_L-2_H-128"  # 中文情感分析模型
+        # 简单的情感分析器，不依赖外部模型
         self.classifier = None
-        self._load_model()
-    
-    def _load_model(self):
-        """加载预训练模型"""
-        try:
-            # 尝试加载中文情感分析模型
-            self.classifier = pipeline(
-                "sentiment-analysis",
-                model=self.model_name,
-                tokenizer=self.model_name,
-                device=-1  # 使用CPU
-            )
-        except Exception as e:
-            print(f"加载模型失败: {e}")
-            # 使用简单的基于词典的方法作为备选
-            self.classifier = None
     
     def analyze(self, text: str) -> float:
         """
@@ -61,33 +43,149 @@ class SentimentAnalyzer:
             return self._simple_sentiment_analysis(text)
     
     def _simple_sentiment_analysis(self, text: str) -> float:
-        """简单的情感分析作为备选"""
-        # 中文情感词典
-        positive_words = {
-            '好', '棒', '优秀', '精彩', '出色', '喜欢', '推荐', '经典', '震撼', '感动',
-            '好看', '不错', '给力', '完美', '优秀', '卓越', '杰出', '令人惊叹',
-            '精彩绝伦', '引人入胜', '感人至深', '回味无穷', '值得一看'
+        """极简情感分析器 - 基于关键词统计"""
+        # 增强的情感词典 - 添加中英文情感词
+        positive_keywords = {
+            # 中文情感词
+            '好', '棒', '精彩', '完美', '经典', '出色', '优秀', '感人', '震撼',
+            '好看', '不错', '喜欢', '推荐', '值得', '满意', '开心', '快乐',
+            '享受', '自然', '真实', '生动', '紧凑', '巧妙', '用心', '推荐',
+            '爱', '最爱', '最佳', '杰作', '神作', '超赞', '牛逼', '厉害',
+            '优美', '深刻', '精彩绝伦', '无与伦比', '叹为观止', '拍手叫好',
+            '过瘾', '爽', '好看', '美丽', '华丽', '精致', '精彩纷呈',
+            # 强烈中文情感词
+            '太精彩了', '真的很好', '非常精彩', '特别棒', '强烈推荐', '太棒了',
+            '非常好', '特别精彩', '非常棒', '太赞了', '真的很棒', '非常出色',
+            '极为精彩', '相当精彩', '极为出色', '非常优秀', '特别优秀',
+            # 英文情感词
+            'great', 'excellent', 'amazing', 'wonderful', 'fantastic', 'brilliant',
+            'perfect', 'masterpiece', 'superb', 'outstanding', 'magnificent',
+            'beautiful', 'love', 'loved', 'best', 'incredible', 'awesome',
+            'good', 'nice', 'enjoyed', 'enjoyable', 'impressed', 'impressive',
+            'touching', 'moving', 'powerful', 'strong', 'remarkable',
+            # 强烈英文情感词
+            'absolutely', 'really', 'very', 'highly', 'truly', 'genuinely',
+            'changed', 'life', 'greatest', 'ever', 'stand', 'time', 'test', 'time'
         }
         
-        negative_words = {
-            '差', '烂', '糟糕', '失望', '无聊', '难看', '垃圾', '浪费时间', '后悔',
-            '差评', '不行', '不好', '失望', '无语', '无力吐槽', '毁三观',
-            '烂片', '雷人', '狗血', '老套', '俗套', '尴尬', '出戏'
+        negative_keywords = {
+            # 中文负面词
+            '差', '烂', '糟糕', '垃圾', '失望', '后悔', '无聊', '难看', '不行',
+            '不好', '一般', '普通', '尴尬', '做作', '夸张', '生硬', '老套',
+            '俗套', '拖沓', '混乱', '牵强', '空洞', '乏味', '单调', '失望',
+            '讨厌', '恶心', '垃圾', '垃圾片', '烂片', '难看', '看不下去',
+            '浪费时间', '毁三观', '催眠', '平庸', '拙劣', '粗糙', '低劣',
+            '无趣', '枯燥', '冗长', '拖沓', '松散', '混乱不堪',
+            # 强烈中文负面情感词
+            '真的很差', '非常糟糕', '特别差', '太烂了', '完全浪费时间', '非常失望',
+            '特别糟糕', '极为糟糕', '相当差', '非常差', '极差', '太差了', '完全不推荐',
+            '非常难看', '特别难看', '极为失望', '相当糟糕', '非常后悔',
+            # 英文负面词
+            'bad', 'terrible', 'awful', 'horrible', 'disappointing', 'disappointed',
+            'waste', 'boring', 'bored', 'poor', 'worst', 'hate', 'hated',
+            'dislike', 'disliked', 'mediocre', 'predictable', 'ridiculous',
+            'stupid', 'dumb', 'sucks', 'sucked', 'crap', 'trash', 'garbage',
+            'overrated', 'disgusting', 'annoying', 'frustrating', 'weak',
+            # 强烈英文负面词
+            'absolutely', 'terrible', 'completely', 'waste', 'time', 'money', 'dont', "don't",
+            'bother', 'watching', 'understand', 'why', 'people', 'love'
         }
         
-        # 文本预处理
-        text = text.lower()
-        text = re.sub(r'[^一-龥a-zA-Z0-9]', '', text)
+        # 强化程度副词 - 中英文
+        intensifiers = {
+            # 中文程度副词
+            '非常', '特别', '极其', '太', '真的', '很', '相当', '十分', '相当',
+            '超级', '极度', '十分', '非常', '相当', '真的', '确实', '实在',
+            '过于', '太过', '尤其', '格外', '特别', '十分', '相当', '非常',
+            # 英文程度副词
+            'very', 'really', 'so', 'extremely', 'absolutely', 'completely',
+            'totally', 'quite', 'rather', 'pretty', 'fairly', 'highly',
+            'truly', 'genuinely', 'quite', 'really', 'very', 'so'
+        }
         
-        # 计算情感分数
-        positive_count = sum(1 for word in positive_words if word in text)
-        negative_count = sum(1 for word in negative_words if word in text)
+        # 强化否定词 - 中英文
+        negations = {
+            # 中文否定词
+            '不', '没', '无', '别', '未', '毫无', '完全没有',
+            # 英文否定词
+            'not', 'no', 'never', 'none', 'nothing', 'nobody', 'nowhere',
+            'neither', 'nor', "don't", "dont", "doesn't", "doesnt", 
+            "didn't", "didnt", "won't", "wont", "wouldn't", "wouldnt",
+            "can't", "cant", "couldn't", "couldnt", "shouldn't", "shouldnt"
+        }
         
-        total = positive_count + negative_count
-        if total == 0:
+        text_lower = text.lower()
+        
+        # 计算正面分数
+        positive_score = 0
+        for keyword in positive_keywords:
+            if keyword in text_lower:
+                # 检查否定词
+                keyword_pos = text_lower.find(keyword)
+                start_pos = max(0, keyword_pos - 8)  # 扩大搜索范围
+                preceding_text = text_lower[start_pos:keyword_pos]
+                
+                # 只有当否定词直接修饰情感词时才算否定
+                negation_found = False
+                for neg in negations:
+                    if neg in preceding_text and len(preceding_text.strip()) <= len(neg) + 2:
+                        negation_found = True
+                        break
+                
+                if negation_found:
+                    positive_score -= 1  # 被否定的正面词
+                else:
+                    positive_score += 1
+                    
+                    # 检查程度副词
+                    for intensifier in intensifiers:
+                        if intensifier in preceding_text:
+                            positive_score += 0.5
+                            break
+        
+        # 计算负面分数
+        negative_score = 0
+        for keyword in negative_keywords:
+            if keyword in text_lower:
+                # 检查否定词
+                keyword_pos = text_lower.find(keyword)
+                start_pos = max(0, keyword_pos - 8)  # 扩大搜索范围
+                preceding_text = text_lower[start_pos:keyword_pos]
+                
+                # 只有当否定词直接修饰情感词时才算否定
+                negation_found = False
+                for neg in negations:
+                    if neg in preceding_text and len(preceding_text.strip()) <= len(neg) + 2:
+                        negation_found = True
+                        break
+                
+                if negation_found:
+                    negative_score -= 1  # 被否定的负面词
+                else:
+                    negative_score += 1
+                    
+                    # 检查程度副词
+                    for intensifier in intensifiers:
+                        if intensifier in preceding_text:
+                            negative_score += 0.5
+                            break
+        
+        # 计算总分
+        total_score = positive_score - negative_score
+        
+        # 如果没有情感词，返回中性
+        if total_score == 0:
             return 0.0
         
-        return (positive_count - negative_count) / total
+        # 标准化到[-1, 1]范围 - 大幅增强敏感性
+        max_score = len(positive_keywords) + len(negative_keywords)
+        if max_score > 0:
+            normalized = total_score / max_score
+            # 极大增强敏感性，让情感表达更强烈
+            enhanced_score = normalized * 12  # 从乘以8改为乘以12
+            return max(min(enhanced_score, 1.0), -1.0)
+        
+        return 0.0
     
     def batch_analyze(self, texts: List[str]) -> List[float]:
         """批量分析情感倾向"""

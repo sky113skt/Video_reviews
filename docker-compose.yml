@@ -1,20 +1,22 @@
-version: '3.8'
-
 services:
   movie-review-agent:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"    # FastAPI服务
       - "8501:8501"    # Streamlit界面
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - KIMI_API_KEY=${KIMI_API_KEY}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - HOST=0.0.0.0
       - PORT=8000
       - DEBUG=false
+      - API_BASE_URL=http://localhost:8000
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
+      - ./static:/app/static
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -22,22 +24,8 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - movie-agent-network
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"      # HTTP
-      - "443:443"    # HTTPS
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - movie-review-agent
-    restart: unless-stopped
-    networks:
-      - movie-agent-network
+      - movie-review-network
 
 networks:
-  movie-agent-network:
+  movie-review-network:
     driver: bridge

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class MovieInfo(BaseModel):
     """电影基本信息"""
+    id: Optional[int] = Field(None, description="TMDB电影ID")
     title: str = Field(..., description="电影标题")
     year: Optional[int] = Field(None, description="上映年份")
     director: List[str] = Field(default_factory=list, description="导演")
@@ -52,6 +53,10 @@ class ReviewResponse(BaseModel):
     generated_at: datetime = Field(..., description="生成时间")
     word_count: int = Field(0, description="字数统计")
     review_style: str = Field("professional", description="影评风格")
+    rating_breakdown: Optional[Dict[str, Any]] = Field(None, description="评分分解详情")
+    confidence_level: Optional[str] = Field(None, description="评分置信度")
+    sentiment_distribution: Optional[Dict[str, int]] = Field(None, description="情感分布")
+    review_count: Optional[int] = Field(None, description="评论数量")
 
 
 class ReviewAnalysis(BaseModel):

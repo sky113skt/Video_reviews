@@ -5,7 +5,7 @@
 ## ✨ 功能特性
 
 - **🔍 智能信息收集**：自动从TMDB、网络等多源收集电影信息
-- **🤖 AI深度分析**：基于LangChain和OpenAI GPT进行智能分析
+- **🤖 AI深度分析**：基于LangChain和Kimi进行智能分析
 - **✍️ 个性化影评**：根据用户需求生成不同风格的影评
 - **📊 情感分析**：分析现有影评的情感倾向
 - **🎯 目标导向**：针对不同观众群体提供定制化内容
@@ -17,45 +17,50 @@
 ### 环境要求
 
 - Python 3.8+
-- OpenAI API Key
+- Docker (推荐)
+- Kimi API Key
 - TMDB API Key
 
-### 安装步骤
+### 一键部署
 
-1. **克隆项目**
 ```bash
+# 1. 克隆项目
 git clone <repository-url>
 cd video_reviews
-```
 
-2. **配置环境**
-```bash
-# 复制环境配置模板
+# 2. 配置环境
 cp .env.example .env
-
 # 编辑.env文件，填入API密钥
-nano .env
+
+# 3. 一键部署
+chmod +x deploy.sh
+./deploy.sh setup
+./deploy.sh start
 ```
 
-3. **安装依赖**
+### 手动部署
+
+1. **配置环境**
 ```bash
-pip install -r requirements.txt
+cp .env.example .env
+# 编辑.env文件，填入API密钥
 ```
 
-4. **启动服务**
+2. **开发模式**
 ```bash
-# 一键启动（推荐）
-./start.sh
+./deploy.sh dev
+```
 
-# 或分别启动
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-streamlit run app.py --server.port 8501
+3. **生产模式**
+```bash
+./deploy.sh build
+./deploy.sh start
 ```
 
 ### API密钥获取
 
-#### OpenAI API Key
-1. 访问 [OpenAI官网](https://platform.openai.com/api-keys)
+#### Kimi API Key
+1. 访问 [月之暗面官网](https://platform.moonshot.cn)
 2. 注册账号并创建API Key
 
 #### TMDB API Key
@@ -148,36 +153,46 @@ video_reviews/
 
 ## 🐳 Docker部署
 
-### 构建镜像
+### 环境准备
+首先，复制 `.env.example` 文件为 `.env` 并填写你的 API 密钥：
 ```bash
-docker build -t movie-review-agent .
+cp .env.example .env
+# 编辑 .env 文件，填入你的 Kimi 和 TMDB API 密钥
+nano .env
 ```
 
-### 运行容器
+### 一键部署脚本
+项目提供了 `deploy.sh` 脚本，可以一键完成构建和部署：
 ```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+### Docker Compose 部署（开发环境）
+```bash
+docker-compose up -d
+```
+
+### Docker Compose 部署（生产环境）
+生产环境使用 nginx 作为反向代理提供更好的性能和安全性：
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### 手动构建和运行
+```bash
+# 构建镜像
+docker build -t movie-review-agent .
+
+# 运行容器
 docker run -d \
-  --name movie-agent \
+  --name movie-review-agent \
   -p 8000:8000 \
   -p 8501:8501 \
-  -e OPENAI_API_KEY=your_key \
-  -e TMDB_API_KEY=your_key \
+  -v ./logs:/app/logs \
+  -v ./.env:/app/.env:ro \
+  --env-file .env \
   movie-review-agent
-```
-
-### Docker Compose
-```yaml
-version: '3.8'
-services:
-  movie-agent:
-    build: .
-    ports:
-      - "8000:8000"
-      - "8501:8501"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-    volumes:
-      - ./logs:/app/logs
 ```
 
 ## 🔧 配置选项
@@ -185,7 +200,7 @@ services:
 ### 环境变量
 | 变量名 | 说明 | 示例 |
 |--------|------|------|
-| OPENAI_API_KEY | OpenAI API密钥 | sk-xxxxxxxx |
+| KIMI_API_KEY | Kimi API密钥 | sk-xxxxxxxx |
 | TMDB_API_KEY | TMDB API密钥 | xxxxxxxxx |
 | HOST | 服务主机 | 0.0.0.0 |
 | PORT | 服务端口号 | 8000 |
@@ -222,7 +237,7 @@ services:
 - 使用更简单的关键词
 
 ### 3. 生成速度慢
-- 检查OpenAI API响应时间
+- 检查Kimi API响应时间
 - 减少max_length参数
 - 使用更快的模型
 
